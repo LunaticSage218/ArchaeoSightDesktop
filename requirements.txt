@@ -1,0 +1,9 @@
+PyQt6
+pyqt6-sip
+numpy
+pandas
+scikit-learn
+skl2onnx
+onnx
+tensorflow
+hdbscan
