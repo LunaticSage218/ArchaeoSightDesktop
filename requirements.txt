@@ -7,3 +7,5 @@ skl2onnx
 onnx
 tensorflow
 hdbscan
+matplotlib
+pykrige

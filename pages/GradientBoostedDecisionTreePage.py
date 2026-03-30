@@ -13,7 +13,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QColor
 
-# ── Periodic table element symbols used to filter columns ─────────────────────
+from styles import (
+    section, bold_label, h_line, primary_btn,
+    HEADER_BG, GREEN, GREEN_HOVER,
+)
+
+# ── Periodic table element symbols used to filter columns ─────────────────
 PERIODIC_TABLE_ELEMENTS = {
     'H','He','Li','Be','B','C','N','O','F','Ne','Na','Mg','Al','Si','P','S',
     'Cl','Ar','K','Ca','Sc','Ti','V','Cr','Mn','Fe','Co','Ni','Cu','Zn','Ga',
@@ -42,7 +47,6 @@ class TrainWorker(QObject):
         self.save_dir = save_dir
 
     def run(self):
-        print("we ran")
         try:
             from sklearn.ensemble import GradientBoostingClassifier
             from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
@@ -278,27 +282,7 @@ class TestWorker(QObject):
             self.error.emit(traceback.format_exc())
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-def _bold_label(text, size=10):
-    lbl = QLabel(text)
-    lbl.setFont(QFont("Segoe UI", size, QFont.Weight.Bold))
-    return lbl
-
-
-def _section(title):
-    box = QGroupBox(title)
-    box.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-    return box
-
-
-def _h_line():
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    return line
-
-
-# ── Train Tab ──────────────────────────────────────────────────────────────────
+# ── Train Tab ────────────────────────────────────────────────────────────────────
 class TrainTab(QWidget):
     def __init__(self):
         super().__init__()
@@ -320,7 +304,7 @@ class TrainTab(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         # File selection
-        file_box = _section("1. Data File")
+        file_box = section("1. Data File")
         file_form = QVBoxLayout(file_box)
         file_row = QHBoxLayout()
         self.train_file_edit = QLineEdit()
@@ -341,7 +325,7 @@ class TrainTab(QWidget):
         left_layout.addWidget(file_box)
 
         # Hyperparameters
-        hp_box = _section("2. Hyperparameters")
+        hp_box = section("2. Hyperparameters")
         hp_form = QFormLayout(hp_box)
         hp_form.setSpacing(6)
 
@@ -369,7 +353,7 @@ class TrainTab(QWidget):
         left_layout.addWidget(hp_box)
 
         # Save options
-        save_box = _section("3. Save Model")
+        save_box = section("3. Save Model")
         save_layout = QVBoxLayout(save_box)
 
         fmt_row = QHBoxLayout()
@@ -389,6 +373,11 @@ class TrainTab(QWidget):
         name_row.addWidget(self.model_name_edit)
         save_layout.addLayout(name_row)
 
+        save_layout.addWidget(QLabel("Model folder name:"))
+        self.folder_name_edit = QLineEdit()
+        self.folder_name_edit.setPlaceholderText("e.g. gbdt_run_01")
+        save_layout.addWidget(self.folder_name_edit)
+
         dir_row = QHBoxLayout()
         self.save_dir_edit = QLineEdit()
         self.save_dir_edit.setPlaceholderText("Select save directory…")
@@ -402,14 +391,7 @@ class TrainTab(QWidget):
         left_layout.addWidget(save_box)
 
         # Train button + progress
-        self.train_btn = QPushButton("▶  Train Model")
-        self.train_btn.setFixedHeight(38)
-        self.train_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        self.train_btn.setStyleSheet(
-            "QPushButton { background:#2563eb; color:white; border-radius:6px; }"
-            "QPushButton:hover { background:#1d4ed8; }"
-            "QPushButton:disabled { background:#93c5fd; }"
-        )
+        self.train_btn = primary_btn("▶  Train Model")
         self.train_btn.clicked.connect(self._start_training)
         left_layout.addWidget(self.train_btn)
 
@@ -425,7 +407,7 @@ class TrainTab(QWidget):
         right_splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Log
-        log_box = _section("Training Log")
+        log_box = section("Training Log")
         log_layout = QVBoxLayout(log_box)
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
@@ -435,7 +417,7 @@ class TrainTab(QWidget):
         right_splitter.addWidget(log_box)
 
         # Metrics summary
-        metrics_box = _section("Results")
+        metrics_box = section("Results")
         metrics_layout = QVBoxLayout(metrics_box)
 
         self.metrics_label = QLabel("Train a model to see results.")
@@ -443,10 +425,10 @@ class TrainTab(QWidget):
         self.metrics_label.setWordWrap(True)
         metrics_layout.addWidget(self.metrics_label)
 
-        metrics_layout.addWidget(_h_line())
+        metrics_layout.addWidget(h_line())
 
         # Feature importance table
-        metrics_layout.addWidget(_bold_label("Feature Importance"))
+        metrics_layout.addWidget(bold_label("Feature Importance"))
         self.fi_table = QTableWidget(0, 2)
         self.fi_table.setHorizontalHeaderLabels(["Element", "Importance"])
         self.fi_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -454,13 +436,13 @@ class TrainTab(QWidget):
         self.fi_table.setFixedHeight(200)
         metrics_layout.addWidget(self.fi_table)
 
-        metrics_layout.addWidget(_bold_label("Confusion Matrix (Multi-class)"))
+        metrics_layout.addWidget(bold_label("Confusion Matrix (Multi-class)"))
         self.cm_table = QTableWidget(0, 0)
         self.cm_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.cm_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         metrics_layout.addWidget(self.cm_table)
 
-        metrics_layout.addWidget(_bold_label("Per-class Report"))
+        metrics_layout.addWidget(bold_label("Per-class Report"))
         self.report_table = QTableWidget(0, 4)
         self.report_table.setHorizontalHeaderLabels(["Class", "Precision", "Recall", "F1-Score"])
         self.report_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -516,6 +498,12 @@ class TrainTab(QWidget):
         if not save_dir:
             QMessageBox.warning(self, "Missing Input", "Please select a directory to save the model.")
             return
+
+        folder_name = self.folder_name_edit.text().strip()
+        if folder_name:
+            save_dir = os.path.join(save_dir, folder_name)
+            os.makedirs(save_dir, exist_ok=True)
+
         model_name = self.model_name_edit.text().strip()
         if not model_name:
             QMessageBox.warning(self, "Missing Input", "Please enter a model name.")
@@ -536,9 +524,7 @@ class TrainTab(QWidget):
 
         self._thread = QThread()
         self._worker = TrainWorker(file_path, label_col, params, save_format, model_name, save_dir)
-        print("before thread")
         self._worker.moveToThread(self._thread)
-        print("after thread")
         self._thread.started.connect(self._worker.run)
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_train_finished)
@@ -589,10 +575,9 @@ class TrainTab(QWidget):
                 item = QTableWidgetItem(str(val))
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if i == j and val > 0:
-                    intensity = int(180 + 75 * val / max_val)
-                    item.setBackground(QColor(0, min(intensity, 255), 0, 120))
+                    item.setBackground(QColor(6, 95, 70, 180))
                 elif val > 0:
-                    item.setBackground(QColor(255, 80, 80, 100))
+                    item.setBackground(QColor(153, 27, 27, 150))
                 self.cm_table.setItem(i, j, item)
         self.cm_table.resizeColumnsToContents()
         self.cm_table.resizeRowsToContents()
@@ -651,7 +636,7 @@ class TestTab(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         # Model file
-        model_box = _section("1. Load Model")
+        model_box = section("1. Load Model")
         model_layout = QVBoxLayout(model_box)
         model_row = QHBoxLayout()
         self.model_file_edit = QLineEdit()
@@ -666,7 +651,7 @@ class TestTab(QWidget):
         left_layout.addWidget(model_box)
 
         # Data file
-        data_box = _section("2. Data File")
+        data_box = section("2. Data File")
         data_layout = QVBoxLayout(data_box)
         data_row = QHBoxLayout()
         self.test_file_edit = QLineEdit()
@@ -687,14 +672,7 @@ class TestTab(QWidget):
         left_layout.addWidget(data_box)
 
         # Run button
-        self.run_btn = QPushButton("▶  Run Model")
-        self.run_btn.setFixedHeight(38)
-        self.run_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        self.run_btn.setStyleSheet(
-            "QPushButton { background:#059669; color:white; border-radius:6px; }"
-            "QPushButton:hover { background:#047857; }"
-            "QPushButton:disabled { background:#6ee7b7; }"
-        )
+        self.run_btn = primary_btn("▶  Run Model", color=GREEN, hover=GREEN_HOVER)
         self.run_btn.clicked.connect(self._start_testing)
         left_layout.addWidget(self.run_btn)
 
@@ -713,7 +691,7 @@ class TestTab(QWidget):
         right_layout.setSpacing(8)
 
         # Log
-        log_box = _section("Log")
+        log_box = section("Log")
         log_layout = QVBoxLayout(log_box)
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
@@ -723,7 +701,7 @@ class TestTab(QWidget):
         right_layout.addWidget(log_box)
 
         # Metrics (shown only when true labels given)
-        self.metrics_box = _section("Accuracy Metrics")
+        self.metrics_box = section("Accuracy Metrics")
         metrics_layout = QVBoxLayout(self.metrics_box)
         self.test_metrics_label = QLabel("")
         self.test_metrics_label.setFont(QFont("Segoe UI", 10))
@@ -733,14 +711,14 @@ class TestTab(QWidget):
         self.test_cm_table = QTableWidget(0, 0)
         self.test_cm_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.test_cm_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        metrics_layout.addWidget(_bold_label("Confusion Matrix"))
+        metrics_layout.addWidget(bold_label("Confusion Matrix"))
         metrics_layout.addWidget(self.test_cm_table)
 
         self.metrics_box.setVisible(False)
         right_layout.addWidget(self.metrics_box)
 
         # Predictions table
-        pred_box = _section("Predictions")
+        pred_box = section("Predictions")
         pred_layout = QVBoxLayout(pred_box)
         self.pred_table = QTableWidget(0, 0)
         self.pred_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -826,7 +804,7 @@ class TestTab(QWidget):
                 val = df.iloc[row_idx, col_idx]
                 item = QTableWidgetItem(str(val))
                 if col_name in highlight_cols:
-                    item.setBackground(QColor(219, 234, 254))  # light blue
+                    item.setBackground(QColor(30, 58, 138, 150))
                 self.pred_table.setItem(row_idx, col_idx, item)
         self._append_log(f"Done. {len(df)} predictions generated.")
 
@@ -851,10 +829,10 @@ class TestTab(QWidget):
                     val = cm[i][j]
                     item = QTableWidgetItem(str(val))
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    if i == j and val > 0:
-                        item.setBackground(QColor(0, min(180 + 75 * val // max_val, 255), 0, 120))
-                    elif val > 0:
-                        item.setBackground(QColor(255, 80, 80, 100))
+                if i == j and val > 0:
+                    item.setBackground(QColor(6, 95, 70, 180))
+                elif val > 0:
+                    item.setBackground(QColor(153, 27, 27, 150))
                     self.test_cm_table.setItem(i, j, item)
             self.test_cm_table.resizeColumnsToContents()
             self.test_cm_table.resizeRowsToContents()
@@ -886,7 +864,7 @@ class GradientBoostedDecisionTreePage(QWidget):
 
         # Header
         header = QWidget()
-        header.setStyleSheet("background:#1e3a5f;")
+        header.setStyleSheet(f"background:{HEADER_BG};")
         header.setFixedHeight(56)
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(16, 0, 16, 0)

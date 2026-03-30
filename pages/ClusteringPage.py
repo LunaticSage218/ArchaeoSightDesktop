@@ -10,12 +10,15 @@ from PyQt6.QtWidgets import (
     QFileDialog, QComboBox, QDoubleSpinBox, QSpinBox, QLineEdit,
     QTabWidget, QGroupBox, QFormLayout, QTableWidget, QTableWidgetItem,
     QScrollArea, QProgressBar, QMessageBox, QHeaderView,
-    QTextEdit, QSplitter, QFrame, QCheckBox, QSizePolicy
+    QTextEdit, QSplitter, QFrame
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QColor, QPixmap
 
-print("we got past the first imports")
+from styles import (
+    section, bold_label, h_line, primary_btn,
+    HEADER_BG, IMAGE_STYLE, GREEN, GREEN_HOVER,
+)
 
 # ── Periodic table symbols ─────────────────────────────────────────────────────
 PERIODIC_TABLE_ELEMENTS = {
@@ -28,57 +31,6 @@ PERIODIC_TABLE_ELEMENTS = {
     'U','Np','Pu','Am','Cm','Bk','Cf','Es','Fm','Md','No','Lr','Rf','Db','Sg',
     'Bh','Hs','Mt','Ds','Rg','Cn','Nh','Fl','Mc','Lv','Ts','Og'
 }
-
-# ── Shared style helpers ───────────────────────────────────────────────────────
-def _section(title):
-    box = QGroupBox(title)
-    box.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-    box.setStyleSheet("""
-        QGroupBox {
-            color: #111827;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            margin-top: 10px;
-            padding-top: 6px;
-        }
-        QGroupBox::title {
-            color: #111827;
-            subcontrol-origin: margin;
-            left: 8px;
-            padding: 0 4px;
-        }
-        QLabel      { color: #111827; background: transparent; }
-        QRadioButton{ color: #111827; background: transparent; }
-        QCheckBox   { color: #111827; background: transparent; }
-    """)
-    return box
-
-
-def _bold_label(text, size=10):
-    lbl = QLabel(text)
-    lbl.setFont(QFont("Segoe UI", size, QFont.Weight.Bold))
-    lbl.setStyleSheet("color: #111827;")
-    return lbl
-
-
-def _h_line():
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Sunken)
-    return line
-
-
-def _primary_btn(text, color="#2563eb", hover="#1d4ed8"):
-    btn = QPushButton(text)
-    btn.setFixedHeight(38)
-    btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-    btn.setStyleSheet(
-        f"QPushButton {{ background:{color}; color:white; border-radius:6px; }}"
-        f"QPushButton:hover {{ background:{hover}; }}"
-        f"QPushButton:disabled {{ background:#9ca3af; color:#e5e7eb; }}"
-    )
-    return btn
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TRAIN WORKER
@@ -96,21 +48,13 @@ class TrainWorker(QObject):
     def run(self):
         try:
             import tensorflow as tf
-            print("we imported tf")
             from tensorflow.keras import callbacks as keras_cb
-            print("we imported tfkeras")
             from sklearn.preprocessing import StandardScaler
-            print("we imported tf std scaler")
             from sklearn.decomposition import PCA
-            print("we imported PCA")
             from sklearn.model_selection import train_test_split
-            print("we imported tts")
             from sklearn.ensemble import RandomForestClassifier
-            print("we imported rfc")
             from sklearn.metrics import silhouette_score, accuracy_score, f1_score, classification_report
-            print("we imported a bucnh of stuff")
             import hdbscan
-            print("we imported hdb")
             from collections import Counter, defaultdict
 
             p = self.p
@@ -343,6 +287,48 @@ class TrainWorker(QObject):
             tr_df.to_csv(out_dir / 'cluster_assignments_train.csv', index=False)
             te_df.to_csv(out_dir / 'cluster_assignments_test.csv',  index=False)
 
+            # ── Step 10: Baselines (PCA+HDBSCAN and KMeans) ───────────────────
+            self.log.emit("Step 10: Running baselines (PCA+HDBSCAN, KMeans)…")
+            import json
+            from sklearn.cluster import KMeans as _KMeans
+
+            pca_baseline_dim = min(6, n_features)
+            pca_b = PCA(n_components=pca_baseline_dim, random_state=seed)
+            X_pca_tr = pca_b.fit_transform(X_tr_s)
+            X_pca_te = pca_b.transform(X_te_s)
+
+            clusterer_b = hdbscan.HDBSCAN(
+                min_cluster_size=20, min_samples=5, prediction_data=True
+            )
+            labels_pca_hdb_tr = clusterer_b.fit_predict(X_pca_tr)
+            unique_b = np.unique(labels_pca_hdb_tr)
+            real_b = [l for l in unique_b if l != -1]
+            self.log.emit(f"  Baseline HDBSCAN unique labels: {unique_b.tolist()}")
+            if real_b:
+                labels_pca_hdb_te, _ = hdbscan.approximate_predict(clusterer_b, X_pca_te)
+            else:
+                self.log.emit("  Baseline HDBSCAN: no clusters found.")
+                labels_pca_hdb_te = np.full(len(X_pca_te), -1, dtype=int)
+            with open(out_dir / 'pca_hdbscan_model.pkl', 'wb') as f:
+                pickle.dump({'pca': pca_b, 'hdbscan': clusterer_b}, f)
+
+            k = 5
+            kmeans = _KMeans(n_clusters=k, random_state=seed)
+            km_labels_tr = kmeans.fit_predict(X_pca_tr)
+            with open(out_dir / 'kmeans_model.pkl', 'wb') as f:
+                pickle.dump(kmeans, f)
+
+            baselines = {
+                'baseline_cluster_counts': {
+                    'hdbscan_clusters': int(len(real_b)),
+                    'kmeans_clusters': int(k),
+                }
+            }
+            with open(out_dir / 'baselines.json', 'w') as f:
+                json.dump(baselines, f, indent=2)
+            self.log.emit(f"  Baseline HDBSCAN clusters: {len(real_b)}  |  KMeans clusters: {k}")
+            results['baselines'] = baselines
+
             results['n_clusters']        = len(real_clusters)
             results['n_noise']           = int((cl_tr == -1).sum())
             results['n_train']           = len(X_tr)
@@ -520,7 +506,7 @@ class TrainTab(QWidget):
         lv = QVBoxLayout(left); lv.setSpacing(10); lv.setContentsMargins(0,0,0,0)
 
         # Data file
-        fb = _section("1. Data File")
+        fb = section("1. Data File")
         fl = QVBoxLayout(fb)
         fr = QHBoxLayout()
         self.file_edit = QLineEdit(); self.file_edit.setPlaceholderText("CSV or Excel…")
@@ -544,7 +530,7 @@ class TrainTab(QWidget):
         lv.addWidget(fb)
 
         # Hyperparameters
-        hb = _section("2. Hyperparameters")
+        hb = section("2. Hyperparameters")
         hf = QFormLayout(hb); hf.setSpacing(6)
 
         self.latent_spin = QSpinBox(); self.latent_spin.setRange(2, 64); self.latent_spin.setValue(8)
@@ -568,7 +554,7 @@ class TrainTab(QWidget):
         lv.addWidget(hb)
 
         # Output dir
-        ob = _section("3. Output Folder")
+        ob = section("3. Output Folder")
         ol = QVBoxLayout(ob)
         or_ = QHBoxLayout()
         self.out_edit = QLineEdit(); self.out_edit.setPlaceholderText("Select output folder…")
@@ -577,10 +563,15 @@ class TrainTab(QWidget):
         ob2.clicked.connect(self._browse_out)
         or_.addWidget(self.out_edit); or_.addWidget(ob2)
         ol.addLayout(or_)
+
+        ol.addWidget(QLabel("Model folder name:"))
+        self.folder_name_edit = QLineEdit()
+        self.folder_name_edit.setPlaceholderText("e.g. clustering_run_01")
+        ol.addWidget(self.folder_name_edit)
         lv.addWidget(ob)
 
         # Run button
-        self.run_btn = _primary_btn("▶  Run Pipeline")
+        self.run_btn = primary_btn("▶  Run Pipeline")
         self.run_btn.clicked.connect(self._start)
         lv.addWidget(self.run_btn)
 
@@ -594,7 +585,7 @@ class TrainTab(QWidget):
         right_split = QSplitter(Qt.Orientation.Vertical)
 
         # Log + epoch loss
-        log_box = _section("Pipeline Log")
+        log_box = section("Pipeline Log")
         log_layout = QVBoxLayout(log_box)
         self.log_edit = QTextEdit(); self.log_edit.setReadOnly(True)
         self.log_edit.setFont(QFont("Consolas", 9)); self.log_edit.setFixedHeight(140)
@@ -612,10 +603,9 @@ class TrainTab(QWidget):
         self.metrics_label = QLabel("Run the pipeline to see results.")
         self.metrics_label.setWordWrap(True)
         self.metrics_label.setFont(QFont("Segoe UI", 10))
-        self.metrics_label.setStyleSheet("color:#111827;")
         self.res_layout.addWidget(self.metrics_label)
 
-        self.res_layout.addWidget(_bold_label("Cluster Distribution (Training)"))
+        self.res_layout.addWidget(bold_label("Cluster Distribution (Training)"))
         self.cluster_table = QTableWidget(0, 2)
         self.cluster_table.setHorizontalHeaderLabels(["Cluster", "Count"])
         self.cluster_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -623,15 +613,15 @@ class TrainTab(QWidget):
         self.cluster_table.setFixedHeight(160)
         self.res_layout.addWidget(self.cluster_table)
 
-        self.res_layout.addWidget(_bold_label("Training Loss Plot"))
+        self.res_layout.addWidget(bold_label("Training Loss Plot"))
         self.loss_img = QLabel(); self.loss_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.loss_img.setStyleSheet("border:1px solid #d1d5db; background:#f9fafb;")
+        self.loss_img.setStyleSheet(IMAGE_STYLE)
         self.loss_img.setMinimumHeight(220)
         self.res_layout.addWidget(self.loss_img)
 
-        self.res_layout.addWidget(_bold_label("Cluster Visualization"))
+        self.res_layout.addWidget(bold_label("Cluster Visualization"))
         self.cluster_img = QLabel(); self.cluster_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cluster_img.setStyleSheet("border:1px solid #d1d5db; background:#f9fafb;")
+        self.cluster_img.setStyleSheet(IMAGE_STYLE)
         self.cluster_img.setMinimumHeight(280)
         self.res_layout.addWidget(self.cluster_img)
 
@@ -673,13 +663,16 @@ class TrainTab(QWidget):
 
     # ── Start ──────────────────────────────────────────────────────────────
     def _start(self):
-        print("we start")
         csv_path = self.file_edit.text().strip()
         out_dir  = self.out_edit.text().strip()
         if not csv_path:
             QMessageBox.warning(self, "Missing", "Please select a data file."); return
         if not out_dir:
             QMessageBox.warning(self, "Missing", "Please select an output folder."); return
+
+        folder_name = self.folder_name_edit.text().strip()
+        if folder_name:
+            out_dir = os.path.join(out_dir, folder_name)
 
         # Determine feature columns
         ext = os.path.splitext(csv_path)[1].lower()
@@ -710,16 +703,12 @@ class TrainTab(QWidget):
         }
 
         self.log_edit.clear()
-        print("we clear")
-        print("we epoch label set text")
         self.metrics_label.setText("Running pipeline…")
         self.run_btn.setEnabled(False); self.progress.setVisible(True)
 
         self._thread = QThread()
         self._worker = TrainWorker(params)
-        print("before thread")
         self._worker.moveToThread(self._thread)
-        print("after thread")
         self._thread.started.connect(self._worker.run)
         self._worker.log.connect(self.log_edit.append)
         self._worker.finished.connect(self._on_finished)
@@ -747,6 +736,12 @@ class TrainTab(QWidget):
             if 'multi_accuracy' in r:
                 lines.append(f"<b>Multiclass RF accuracy:</b> {r['multi_accuracy']:.4f}  "
                              f"<b>F1 (weighted):</b> {r['multi_f1']:.4f}")
+        if 'baselines' in r:
+            bc = r['baselines'].get('baseline_cluster_counts', {})
+            lines.append(
+                f"<b>Baseline PCA+HDBSCAN clusters:</b> {bc.get('hdbscan_clusters', '?')}  |  "
+                f"<b>KMeans clusters:</b> {bc.get('kmeans_clusters', '?')}"
+            )
         self.metrics_label.setText("<br>".join(lines))
 
         # Cluster table
@@ -757,9 +752,9 @@ class TrainTab(QWidget):
             self.cluster_table.setItem(i, 0, QTableWidgetItem(lbl))
             item = QTableWidgetItem(str(cnt)); item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if cl == -1:
-                item.setBackground(QColor(254, 226, 226))
+                item.setBackground(QColor(127, 29, 29, 180))
             else:
-                item.setBackground(QColor(219, 234, 254))
+                item.setBackground(QColor(30, 58, 138, 150))
             self.cluster_table.setItem(i, 1, item)
 
         # Plots
@@ -797,7 +792,7 @@ class ApplyTab(QWidget):
         left = QWidget(); left.setFixedWidth(300)
         lv = QVBoxLayout(left); lv.setSpacing(10); lv.setContentsMargins(0,0,0,0)
 
-        mb = _section("1. Prior Run Output Folder")
+        mb = section("1. Prior Run Output Folder")
         ml = QVBoxLayout(mb)
         ml.addWidget(QLabel("Select the output folder from a previous\ntraining run to load all model files."))
         mr = QHBoxLayout()
@@ -809,11 +804,11 @@ class ApplyTab(QWidget):
         ml.addLayout(mr)
         self.model_status = QLabel("")
         self.model_status.setWordWrap(True)
-        self.model_status.setStyleSheet("color:#6b7280; font-size:11px;")
+        self.model_status.setStyleSheet("font-size:11px;")
         ml.addWidget(self.model_status)
         lv.addWidget(mb)
 
-        db = _section("2. New Data File")
+        db = section("2. New Data File")
         dl = QVBoxLayout(db)
         dr = QHBoxLayout()
         self.data_edit = QLineEdit(); self.data_edit.setPlaceholderText("CSV or Excel…")
@@ -824,7 +819,7 @@ class ApplyTab(QWidget):
         dl.addLayout(dr)
         lv.addWidget(db)
 
-        self.apply_btn = _primary_btn("▶  Apply Model", color="#059669", hover="#047857")
+        self.apply_btn = primary_btn("▶  Apply Model", color=GREEN, hover=GREEN_HOVER)
         self.apply_btn.clicked.connect(self._start)
         lv.addWidget(self.apply_btn)
 
@@ -837,7 +832,7 @@ class ApplyTab(QWidget):
         # ── Right results ──────────────────────────────────────────────────
         right_split = QSplitter(Qt.Orientation.Vertical)
 
-        log_box = _section("Log")
+        log_box = section("Log")
         log_layout = QVBoxLayout(log_box)
         self.log_edit = QTextEdit(); self.log_edit.setReadOnly(True)
         self.log_edit.setFont(QFont("Consolas", 9)); self.log_edit.setFixedHeight(110)
@@ -851,17 +846,16 @@ class ApplyTab(QWidget):
         self.apply_metrics = QLabel("Apply a model to see results.")
         self.apply_metrics.setWordWrap(True)
         self.apply_metrics.setFont(QFont("Segoe UI", 10))
-        self.apply_metrics.setStyleSheet("color:#111827;")
         rv.addWidget(self.apply_metrics)
 
-        rv.addWidget(_bold_label("Cluster Visualization"))
+        rv.addWidget(bold_label("Cluster Visualization"))
         self.apply_cluster_img = QLabel()
         self.apply_cluster_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.apply_cluster_img.setStyleSheet("border:1px solid #d1d5db; background:#f9fafb;")
+        self.apply_cluster_img.setStyleSheet(IMAGE_STYLE)
         self.apply_cluster_img.setMinimumHeight(260)
         rv.addWidget(self.apply_cluster_img)
 
-        rv.addWidget(_bold_label("Predictions Table"))
+        rv.addWidget(bold_label("Predictions Table"))
         self.pred_table = QTableWidget(0, 0)
         self.pred_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.pred_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -955,7 +949,7 @@ class ApplyTab(QWidget):
                 val  = df.iloc[ri, ci]
                 item = QTableWidgetItem(str(val))
                 if col in highlight:
-                    item.setBackground(QColor(219, 234, 254))
+                    item.setBackground(QColor(30, 58, 138, 150))
                 self.pred_table.setItem(ri, ci, item)
 
     def _on_error(self, msg):
@@ -974,7 +968,7 @@ class ClusteringPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         header = QWidget()
-        header.setStyleSheet("QWidget { background:#1e3a5f; color:white; }")
+        header.setStyleSheet(f"QWidget {{ background:{HEADER_BG}; }}")
         header.setFixedHeight(56)
         hl = QHBoxLayout(header); hl.setContentsMargins(16, 0, 16, 0)
         title = QLabel("Autoencoder + HDBSCAN  –  Unsupervised pXRF Clustering")
