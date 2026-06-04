@@ -1,0 +1,9 @@
+.venv
+.idea
+models
+claude.md
+*.png
+*.csv
+.vscode
+__pycache__
+pages/__pycache__
