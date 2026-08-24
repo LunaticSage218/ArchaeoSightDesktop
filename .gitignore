@@ -7,3 +7,18 @@ claude.md
 .vscode
 __pycache__
 pages/__pycache__
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# doesn't work yet :(
+build_windows.py
+pyi_rth_native_dlls.py
+
+# other stuff
+*.png
+*.csv
+*.pdf
+pXRF_Paper/

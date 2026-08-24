@@ -1,0 +1,280 @@
+\documentclass[sigconf]{acmart}
+%% ACM style requires these packages
+\usepackage{graphicx}
+\usepackage{booktabs} % for professional tables
+%% ACM metadata
+\acmConference[Conference'26]{ACM Conference}{June 2026}{City, State, Country}
+\acmYear{2026}
+\copyrightyear{2026}
+\acmDOI{XXXXXXX.XXXXXXX}
+\acmISBN{978-1-4503-XXXX-X/26/06}
+%% Rights management (choose one)
+%\setcopyright{acmcopyright}
+%\setcopyright{acmlicensed}
+\setcopyright{rightsretained}
+%%
+%% The majority of ACM publications use the "sigconf" format.
+%% Other options: sigplan, acmtog, acmsmall, acmlarge
+%%
+\begin{document}
+%%
+%% Title and authors
+%%
+\title{Using Supervised and Unsupervised Machine Learning Methods to Classify XRF Samples}
+\author{Larry Griffith}
+\affiliation{%
+  \institution{Northern Arizona University}
+  \city{Flagstaff}
+  \state{Arizona}
+  \country{United States}
+}
+\email{ldg246@nau.edu}
+\author{Dr. Kayeleigh Sharp}
+\affiliation{%
+  \institution{Northern Arizona University}
+  \city{Flagstaff}
+  \state{Arizona}
+  \country{United States}
+}
+\email{kayeleigh.sharp@nau.edu}
+%%
+%% Abstract (required by ACM)
+%%
+\begin{abstract}
+% SCAFFOLD - write this LAST, ~150-200 words. One sentence per move:
+%   1. Context: portable XRF (pXRF) produces elemental readings on archaeological
+%      samples, but assigning each reading to a material class (pottery, soil,
+%      slag, metal, etc.) is manual and subjective.
+%   2. Gap: hand-labeling is slow and inconsistent; labeled data is scarce.
+%   3. What you did: you built ArchaeoSight, a desktop tool that classifies pXRF
+%      samples using BOTH a supervised path (gradient-boosted decision trees) and
+%      an unsupervised path (autoencoder + HDBSCAN), plus geostatistical kriging
+%      and a "next dig" recommender, and a Monte Carlo synthetic-data generator.
+%   4. Key numbers: report headline multi-class and binary (soil/non-soil)
+%      accuracy for the GBDT, silhouette / cluster count for the unsupervised path.
+%   5. Why it matters: faster, reproducible material classification and
+%      data-driven excavation targeting.
+\end{abstract}
+%%
+%% Keywords (required by ACM)
+%%
+\keywords{machine learning, XRF, classification, archaeology, supervised learning,
+  unsupervised learning, gradient boosting, autoencoder, HDBSCAN, kriging,
+  geostatistics, active sampling, synthetic data}
+%%
+%% CCS Concepts (required by ACM — generate at https://dl.acm.org/ccs)
+%%
+% SCAFFOLD - the one below covers ML. Consider ALSO adding:
+%   Applied computing~Arts and humanities  (archaeology angle)
+%   Computing methodologies~Cluster analysis  (HDBSCAN path)
+\begin{CCSXML}
+<ccs2012>
+  <concept>
+    <concept_id>10010147.10010178</concept_id>
+    <concept_desc>Computing methodologies~Machine learning</concept_desc>
+    <concept_significance>500</concept_significance>
+  </concept>
+</ccs2012>
+\end{CCSXML}
+\ccsdesc[500]{Computing methodologies~Machine learning}
+\maketitle
+%%
+%% Body
+%%
+\section{Introduction}
+% SCAFFOLD - the archaeology-first framing. Cover, in order:
+%   - What pXRF data is: each sample is a vector of element concentrations
+%     (the dataset uses Ag, Al, As, Au, Ca, Cr, Cu, Fe, K, Mg, Mn, Ni, P, Pb,
+%     Sr, Ti, V, Zn) plus spatial coordinates (X_Coord, Y_Coord) and context
+%     metadata (BAG, CNTXT, AreaFunction, level).
+%   - The problem: archaeologists must decide what MATERIAL each reading is
+%     (the 'material' column: pottery, soil, etc.). Doing this by eye is slow,
+%     needs expertise, and is inconsistent between analysts.
+%   - The motivation: a tool that classifies automatically AND helps decide
+%     where to dig next would speed up fieldwork and reduce subjectivity.
+%   - State the research questions explicitly, e.g.:
+%       RQ1: Can supervised ML (GBDT) classify pXRF samples by material with
+%            usable accuracy on this dataset?
+%       RQ2: Can unsupervised ML (autoencoder + HDBSCAN) recover meaningful
+%            material groupings WITHOUT labels?
+%       RQ3: Can geostatistics (kriging) + an acquisition score recommend
+%            high-value next excavation locations?
+%   - End with a one-paragraph summary of contributions and a roadmap sentence.
+
+\subsection{Methods}
+% SCAFFOLD - HIGH-LEVEL only here (the detailed version lives in Section 3).
+% Name the four pipelines the tool implements and one line on each:
+%   1. Supervised classification - gradient-boosted decision trees on raw
+%      element concentrations (GradientBoostedDecisionTreePage.py).
+%   2. Unsupervised classification - autoencoder -> PCA -> HDBSCAN clustering,
+%      then clusters mapped to materials (ClusteringPage.py).
+%   3. Spatial interpolation - ordinary/universal kriging of an element's
+%      concentration across the site (KrigingPage.py).
+%   4. Next-dig recommendation - kriging value + uncertainty combined into a
+%      priority score to rank candidate excavation cells (NextDigPage.py).
+%   Mention the Monte Carlo synthetic-sample generator as supporting data
+%   augmentation (montecarlo_samples.py).
+
+\section{Background}
+% SCAFFOLD - what led here + prior work. Suggested subtopics:
+%   - pXRF in archaeology: how it works, why elemental fingerprints relate to
+%     material/provenance, known limitations (matrix effects, surface vs bulk).
+%   - Prior ML-on-XRF work: cite studies that classify materials or sourcing
+%     from XRF/pXRF using ML (find 3-5 references for references.bib).
+%   - Gradient boosting background: brief, cite the GBM / boosting literature.
+%   - Representation learning + density clustering: autoencoders for
+%     dimensionality reduction; HDBSCAN as density-based, noise-aware,
+%     no-fixed-k clustering (cite the HDBSCAN paper).
+%   - Geostatistics: kriging and the variogram, why it suits spatially
+%     autocorrelated concentration data (cite a geostatistics reference).
+%   - Active/sequential sampling: explore-exploit acquisition for choosing
+%     informative new measurement locations (cite Bayesian optimization /
+%     active learning).
+%   - Synthetic data / copulas: why class-conditional augmentation helps with
+%     small, imbalanced labeled sets.
+
+\section{Methods}
+
+\subsection{Implementation}
+% SCAFFOLD - describe the system and EACH model precisely. The tool is a PyQt6
+% desktop app; each method is a page/worker. Document these as they are coded:
+%
+% (a) Supervised - Gradient-Boosted Decision Trees (GradientBoostedDecisionTreePage.py)
+%   - Features: only true element columns are auto-selected (intersection of
+%     dataframe columns with the periodic-table element list).
+%   - Preprocessing: NaN -> 0, negatives clipped to 0; labels via LabelEncoder;
+%     features standardized with StandardScaler.
+%   - Model: sklearn GradientBoostingClassifier with user-set hyperparameters
+%     (n_estimators, learning_rate, max_depth).
+%   - Validation: 5-fold StratifiedKFold cross-validation (report mean +- 2 std),
+%     then an 80/20 stratified train/test split for the final model.
+%   - Evaluation: multi-class accuracy, plus a BINARY soil/non-soil accuracy
+%     derived by thresholding the predicted soil probability at 0.5; confusion
+%     matrix; per-class precision/recall/F1; feature importances per element.
+%   - Export: pickle or ONNX (skl2onnx) for portable inference.
+%
+% (b) Unsupervised - Autoencoder + HDBSCAN (ClusteringPage.py)
+%   - Preprocessing: numeric coercion, NaN -> 0, clip negatives, StandardScaler.
+%     If labels exist, stratified split on the binary soil/non-soil label.
+%   - Representation: a Keras/TensorFlow autoencoder compresses the element
+%     vector to a 'latent_dim' bottleneck; Adam(1e-3), MSE loss, EarlyStopping
+%     on val_loss (patience 10, restore best). Save the encoder + training-loss
+%     curve.
+%   - Reduce: PCA (<=5 components) on the latent vectors.
+%   - Cluster: HDBSCAN (min_cluster_size) on PCA(latent); label -1 = noise.
+%     approximate_predict assigns the held-out/test points; weighted cluster
+%     centroids stored for a KNN-style approximation.
+%   - Label mapping (when ground truth is present): majority vote maps each
+%     cluster to its dominant material; train RandomForest classifiers on the
+%     latent space (binary soil/non-soil and multi-class) for evaluation.
+%   - Evaluation: silhouette score, number of clusters, cluster size counts,
+%     PCA(latent) scatter colored by cluster.
+%   - Export: encoder + HDBSCAN bundle, ONNX via tf2onnx / skl2onnx.
+%
+% (c) Spatial interpolation - Kriging (KrigingPage.py)
+%   - Inputs: X_Coord, Y_Coord, and one chosen element as Z.
+%   - Optional ln(1+Z) log-transform; kriging math runs in transformed space,
+%     interpolation map back-transformed with expm1, variance/variogram stay in
+%     log space.
+%   - Build an nx-by-ny interpolation grid with margins.
+%   - pykrige OrdinaryKriging or UniversalKriging; variogram models available:
+%     linear, power, gaussian, spherical, exponential, hole-effect; nlags and
+%     manual vs auto-fit variogram parameters configurable.
+%   - Outputs: interpolated concentration surface, kriging variance surface,
+%     and the fitted variogram (model parameters extracted).
+%
+% (d) Next-dig recommender - active sampling (NextDigPage.py)
+%   - Run an ordinary-kriging surrogate to get predicted value z_grid and
+%     kriging std-dev sigma = sqrt(variance) on the grid.
+%   - Normalize value and sigma; priority = (1 - w)*value_norm + w*sigma_norm,
+%     where w is the explore/exploit weight (0 = exploit high values, 1 =
+%     explore high uncertainty).
+%   - Mask to the surveyed area (convex hull / Delaunay) and exclude an "avoid
+%     radius" around existing samples (cKDTree) so picks are not resamples.
+%   - Rank remaining candidate cells and emit the top-k as ranked dig
+%     recommendations with predicted value, sigma, and score; render a priority
+%     heatmap and a site-image overlay.
+%
+% (e) Synthetic data - Monte Carlo per-class generator (montecarlo_samples.py)
+%   - Per material class, fit a Gaussian copula: each feature's marginal is
+%     preserved exactly via inverse empirical CDF sampling (no values outside
+%     the observed range); joint structure from a PSD-corrected correlation
+%     matrix.
+%   - Non-numeric / carry-through columns (e.g. coordinates, IDs) are
+%     bootstrap-resampled within the class to keep schema and categoricals.
+%   - Controls: --n-per-class or --multiplier, --exclude, --include-original;
+%     report correlation drift between original and synthetic as a quality check.
+
+\subsection{Datasets}
+% SCAFFOLD - describe the actual data files:
+%   - AllPXRF_FINAL_14Oct.csv: the real pXRF readings. State row count, the
+%     element columns measured (Ag, Al, As, Au, Ca, Cr, Cu, Fe, K, Mg, Mn, Ni,
+%     P, Pb, Sr, Ti, V, Zn), the 'material' label column and its class
+%     distribution, spatial columns (X_Coord, Y_Coord), and context fields
+%     (BAG, CNTXT, AreaFunction, level, pXRFno).
+%   - AllPXRF_FINAL_14Oct_synthetic.csv and combined.csv: Monte Carlo augmented
+%     / merged sets - explain how/why they were generated and whether models
+%     were trained on real, synthetic, or combined data.
+%   - Note preprocessing common to all models (negative values -> 0, NaN -> 0).
+%   - Report class imbalance and how it was handled (stratification, synthetic
+%     augmentation). A small table of class counts would go well here.
+
+\subsection{Successes and Challenges}
+% SCAFFOLD - be candid and concrete:
+%   Successes: which method classified best and the numbers; whether
+%   unsupervised clusters lined up with real materials; useful element
+%   importances (which elements drive class separation); whether kriging
+%   surfaces matched archaeological expectation; sensible next-dig picks.
+%   Challenges: class imbalance; noise / -1 HDBSCAN labels; autoencoder
+%   sensitivity to latent_dim and epochs; variogram fitting failures on sparse
+%   spatial data; risk that synthetic data leaks distribution assumptions;
+%   matrix effects in pXRF; reproducibility (fixed seed = 42 noted in code).
+
+\section{Discussion}
+% SCAFFOLD - interpret, do not just restate results. Tie back to the RQs:
+%   - Supervised vs unsupervised trade-off: GBDT is accurate but needs labels;
+%     the autoencoder+HDBSCAN path finds structure without them - what does that
+%     buy an archaeologist with little labeled data?
+%   - What do the cluster-to-material mappings and feature importances tell us
+%     archaeologically (which elements signal which materials)?
+%   - How the kriging + next-dig pipeline changes fieldwork decisions
+%     (exploit known hotspots vs explore uncertain areas).
+%   - Threats to validity: site-specificity, transfer to other assemblages,
+%     dependence on label quality, synthetic-data realism.
+
+\section{Future Work}
+% SCAFFOLD - directions:
+%   - Try other supervised models (XGBoost/LightGBM, calibrated probabilities).
+%   - Semi-supervised: use HDBSCAN clusters to propose labels for active
+%     re-labeling.
+%   - Close the loop: feed next-dig recommendations back into model retraining
+%     (true active learning).
+%   - Uncertainty-aware classification and conformal prediction.
+%   - Validate synthetic data with downstream-accuracy and statistical tests.
+%   - Cross-site generalization and field deployment of the desktop tool.
+
+\section{Conclusion}
+% SCAFFOLD - 1 short paragraph. Restate the contribution (a desktop tool pairing
+% supervised GBDT and unsupervised autoencoder+HDBSCAN classification of pXRF
+% samples, with kriging-based spatial interpolation and a data-driven next-dig
+% recommender), the headline result(s), and the takeaway for archaeological
+% practice. No new information.
+%%
+%% Acknowledgments
+%%
+\begin{acks}
+  % TODO: Add acknowledgments, funding sources, etc.
+  % SCAFFOLD - advisor (Dr. Sharp), NAU, the excavation/dataset providers,
+  % any grant numbers.
+\end{acks}
+%%
+%% Bibliography
+%% Use BibTeX with the ACM reference format
+%%
+% SCAFFOLD - create references.bib with entries for: pXRF in archaeology,
+% gradient boosting, autoencoders, HDBSCAN, kriging/geostatistics, active
+% learning / Bayesian optimization, Gaussian copulas / synthetic data, and the
+% core libraries used (scikit-learn, TensorFlow/Keras, PyKrige, hdbscan).
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{references} % expects a references.bib file
+\end{document}

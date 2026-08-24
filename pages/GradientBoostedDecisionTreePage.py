@@ -16,6 +16,7 @@ from PyQt6.QtGui import QFont, QColor
 from styles import (
     _section, _bold_label, _primary_btn, _h_line,
     PAGE_HEADER_BG, PAGE_HEADER_FG, GREEN, GREEN_HOVER,
+    ACCENT_ALT, ACCENT_ALT_H,
 )
 
 # ── Periodic table element symbols used to filter columns ─────────────────
@@ -37,7 +38,8 @@ class TrainWorker(QObject):
     error = pyqtSignal(str)
     log = pyqtSignal(str)
 
-    def __init__(self, file_path, label_col, params, save_format, model_name, save_dir):
+    def __init__(self, file_path, label_col, params, save_format, model_name, save_dir,
+                 group_col=None):
         super().__init__()
         self.file_path = file_path
         self.label_col = label_col
@@ -45,12 +47,15 @@ class TrainWorker(QObject):
         self.save_format = save_format
         self.model_name = model_name
         self.save_dir = save_dir
+        self.group_col = group_col
 
     def run(self):
-        print("we ran")
         try:
             from sklearn.ensemble import GradientBoostingClassifier
-            from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+            from sklearn.model_selection import (train_test_split, cross_val_score,
+                                                 StratifiedKFold, StratifiedGroupKFold,
+                                                 GroupShuffleSplit)
+            from sklearn.pipeline import Pipeline
             from sklearn.preprocessing import StandardScaler, LabelEncoder
             from sklearn.metrics import (accuracy_score, classification_report,
                                          confusion_matrix, precision_recall_fscore_support)
@@ -74,19 +79,49 @@ class TrainWorker(QObject):
             # Encode
             le = LabelEncoder()
             y_enc = le.fit_transform(y)
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
 
-            # Cross-validation
-            self.log.emit("Running 5-fold cross-validation…")
-            model_cv = GradientBoostingClassifier(**self.params)
-            skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-            cv_scores = cross_val_score(model_cv, X_scaled, y_enc, cv=skf, scoring='accuracy')
+            # Optional grouping (e.g. BAG/context): keeps repeat shots of the
+            # same object/context out of both sides of every split, so scores
+            # reflect performance on genuinely unseen contexts.
+            groups = None
+            if self.group_col and self.group_col in df.columns:
+                groups = df[self.group_col].astype(str).values
+                self.log.emit(f"Grouping splits by '{self.group_col}' "
+                              f"({len(np.unique(groups))} groups).")
+
+            # Cross-validation — scaler lives inside the pipeline so it is
+            # re-fit on each fold's training portion only (no leakage).
+            pipe = Pipeline([
+                ('scaler', StandardScaler()),
+                ('model', GradientBoostingClassifier(**self.params)),
+            ])
+            if groups is not None:
+                cv_scheme = f"grouped by {self.group_col}"
+                self.log.emit("Running 5-fold grouped cross-validation…")
+                cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
+                cv_scores = cross_val_score(pipe, X, y_enc, cv=cv, groups=groups,
+                                            scoring='accuracy')
+            else:
+                cv_scheme = "stratified"
+                self.log.emit("Running 5-fold cross-validation…")
+                skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+                cv_scores = cross_val_score(pipe, X, y_enc, cv=skf, scoring='accuracy')
             self.log.emit(f"CV scores: {cv_scores.round(4)}  mean={cv_scores.mean():.4f} ±{cv_scores.std()*2:.4f}")
 
-            # Train/test split
-            X_tr, X_te, y_tr, y_te = train_test_split(
-                X_scaled, y_enc, test_size=0.2, random_state=42, stratify=y_enc)
+            # Train/test split on raw values (group-aware when grouping)
+            if groups is not None:
+                gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+                tr_idx, te_idx = next(gss.split(X, y_enc, groups))
+                X_tr_raw, X_te_raw = X.iloc[tr_idx], X.iloc[te_idx]
+                y_tr, y_te = y_enc[tr_idx], y_enc[te_idx]
+            else:
+                X_tr_raw, X_te_raw, y_tr, y_te = train_test_split(
+                    X, y_enc, test_size=0.2, random_state=42, stratify=y_enc)
+
+            # Scale — fit on the training portion only
+            scaler = StandardScaler()
+            X_tr = scaler.fit_transform(X_tr_raw)
+            X_te = scaler.transform(X_te_raw)
 
             # Final model
             self.log.emit("Training final model…")
@@ -99,11 +134,14 @@ class TrainWorker(QObject):
             y_test_labels = le.inverse_transform(y_te)
             acc_multi = accuracy_score(y_test_labels, y_pred)
 
-            # Evaluate binary
+            # Evaluate binary. predict_proba columns follow model.classes_,
+            # which can be a subset of le.classes_ under grouped splits.
             y_proba = model.predict_proba(X_te)
-            soil_idx_arr = np.where(le.classes_ == 'soil')[0]
-            if len(soil_idx_arr):
-                soil_probs = y_proba[:, soil_idx_arr[0]]
+            soil_enc_arr = np.where(le.classes_ == 'soil')[0]
+            soil_col = (np.where(model.classes_ == soil_enc_arr[0])[0]
+                        if len(soil_enc_arr) else [])
+            if len(soil_col):
+                soil_probs = y_proba[:, soil_col[0]]
             else:
                 soil_probs = np.zeros(len(X_te))
             y_bin_pred = np.where(soil_probs > 0.5, 'soil', 'non-soil')
@@ -157,6 +195,7 @@ class TrainWorker(QObject):
             self.finished.emit({
                 'acc_multi': acc_multi,
                 'acc_binary': acc_binary,
+                'cv_scheme': cv_scheme,
                 'cv_mean': float(cv_scores.mean()),
                 'cv_std': float(cv_scores.std()),
                 'cv_scores': cv_scores.tolist(),
@@ -257,6 +296,9 @@ class TestWorker(QObject):
             results_df['Binary_Prediction'] = binary_pred
             results_df['Confidence'] = confidence.round(4)
             results_df['Soil_Probability'] = soil_probs.round(4)
+            # High = likely archaeological material; usable directly as a
+            # kriging/acquisition target on the Next Dig page.
+            results_df['NonSoil_Probability'] = (1.0 - soil_probs).round(4)
 
             metrics = None
             if self.label_col and self.label_col in df.columns:
@@ -323,6 +365,17 @@ class TrainTab(QWidget):
         self.label_col_combo.setEnabled(False)
         file_form.addWidget(QLabel("Sample type column:"))
         file_form.addWidget(self.label_col_combo)
+
+        self.group_col_combo = QComboBox()
+        self.group_col_combo.setPlaceholderText("None (random splits)")
+        self.group_col_combo.setEnabled(False)
+        self.group_col_combo.setToolTip(
+            "Keeps all rows sharing this value (e.g. the same bag or context)\n"
+            "on the same side of every train/test split. Repeat pXRF shots of\n"
+            "one object are near-duplicates; without grouping they leak across\n"
+            "splits and inflate accuracy. Grouped scores are lower but honest.")
+        file_form.addWidget(QLabel("Group column for splits (optional):"))
+        file_form.addWidget(self.group_col_combo)
         left_layout.addWidget(file_box)
 
         # Hyperparameters
@@ -473,6 +526,15 @@ class TrainTab(QWidget):
             self.label_col_combo.clear()
             self.label_col_combo.addItems(non_element_cols)
             self.label_col_combo.setEnabled(True)
+            self.group_col_combo.clear()
+            self.group_col_combo.addItem("")   # blank = no grouping
+            self.group_col_combo.addItems(non_element_cols)
+            self.group_col_combo.setEnabled(True)
+            for hint in ('BAG', 'CNTXT'):
+                i = self.group_col_combo.findText(hint)
+                if i >= 0:
+                    self.group_col_combo.setCurrentIndex(i)
+                    break
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not read file:\n{e}")
 
@@ -512,11 +574,14 @@ class TrainTab(QWidget):
         self.progress.setVisible(True)
         self.metrics_label.setText("Training…")
 
+        group_col = self.group_col_combo.currentText().strip() or None
+        if group_col == label_col:
+            group_col = None
+
         self._thread = QThread()
-        self._worker = TrainWorker(file_path, label_col, params, save_format, model_name, save_dir)
-        print("before thread")
+        self._worker = TrainWorker(file_path, label_col, params, save_format,
+                                   model_name, save_dir, group_col=group_col)
         self._worker.moveToThread(self._thread)
-        print("after thread")
         self._thread.started.connect(self._worker.run)
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_train_finished)
@@ -536,10 +601,11 @@ class TrainTab(QWidget):
         cv_s = results['cv_std']
         cv_scores = results['cv_scores']
 
+        cv_scheme = results.get('cv_scheme', 'stratified')
         self.metrics_label.setText(
             f"<b>Multi-class Accuracy:</b> {acc_m:.4f} ({acc_m*100:.2f}%)    "
             f"<b>Binary Accuracy (Soil/Non-soil):</b> {acc_b:.4f} ({acc_b*100:.2f}%)<br>"
-            f"<b>5-Fold CV:</b> {cv_m:.4f} ± {cv_s*2:.4f}    "
+            f"<b>5-Fold CV ({cv_scheme}):</b> {cv_m:.4f} ± {cv_s*2:.4f}    "
             f"Scores: {[round(s,4) for s in cv_scores]}"
         )
 
@@ -610,10 +676,13 @@ class TrainTab(QWidget):
 
 # ── Test Tab ───────────────────────────────────────────────────────────────────
 class TestTab(QWidget):
+    send_to_next_dig = pyqtSignal(object, str)
+
     def __init__(self):
         super().__init__()
         self._thread = None
         self._worker = None
+        self._results_df = None
         self._build_ui()
 
     def _build_ui(self):
@@ -673,6 +742,16 @@ class TestTab(QWidget):
         self.test_progress.setRange(0, 0)
         self.test_progress.setVisible(False)
         left_layout.addWidget(self.test_progress)
+
+        # Send results to Next Dig page (enabled after a run)
+        self.send_btn = _primary_btn("→  Send Results to Next Dig",
+                                     color=ACCENT_ALT, hover=ACCENT_ALT_H)
+        self.send_btn.setEnabled(False)
+        self.send_btn.setToolTip(
+            "Send classified samples to the Next Dig page to krige on\n"
+            "NonSoil_Probability and get dig-site recommendations.")
+        self.send_btn.clicked.connect(self._send_to_next_dig)
+        left_layout.addWidget(self.send_btn)
 
         left_layout.addStretch()
         main_layout.addWidget(left)
@@ -783,15 +862,23 @@ class TestTab(QWidget):
     def _append_log(self, msg):
         self.log_edit.append(msg)
 
+    def _send_to_next_dig(self):
+        if self._results_df is None:
+            return
+        self.send_to_next_dig.emit(self._results_df, "Classifier results")
+
     def _on_test_finished(self, results):
         df: pd.DataFrame = results['results_df']
         metrics = results.get('metrics')
+        self._results_df = df
+        self.send_btn.setEnabled(True)
 
         # Populate predictions table (show all cols, highlight prediction cols)
         self.pred_table.setRowCount(len(df))
         self.pred_table.setColumnCount(len(df.columns))
         self.pred_table.setHorizontalHeaderLabels(list(df.columns))
-        highlight_cols = {'Predicted_Material', 'Binary_Prediction', 'Confidence', 'Soil_Probability'}
+        highlight_cols = {'Predicted_Material', 'Binary_Prediction', 'Confidence',
+                          'Soil_Probability', 'NonSoil_Probability'}
         for col_idx, col_name in enumerate(df.columns):
             for row_idx in range(len(df)):
                 val = df.iloc[row_idx, col_idx]
@@ -850,6 +937,8 @@ class TestTab(QWidget):
 
 # ── Main Page ──────────────────────────────────────────────────────────────────
 class GradientBoostedDecisionTreePage(QWidget):
+    send_to_next_dig = pyqtSignal(object, str)
+
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
@@ -869,6 +958,8 @@ class GradientBoostedDecisionTreePage(QWidget):
 
         tabs = QTabWidget()
         tabs.setFont(QFont("Segoe UI", 10))
+        test_tab = TestTab()
+        test_tab.send_to_next_dig.connect(self.send_to_next_dig)
         tabs.addTab(TrainTab(), "  Train Model  ")
-        tabs.addTab(TestTab(),  "  Test Model  ")
+        tabs.addTab(test_tab,   "  Test Model  ")
         layout.addWidget(tabs)
