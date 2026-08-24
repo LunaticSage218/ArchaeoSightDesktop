@@ -22,3 +22,5 @@ pyi_rth_native_dlls.py
 *.csv
 *.pdf
 pXRF_Paper/
+diagnose_qt.py
+diagnose.py

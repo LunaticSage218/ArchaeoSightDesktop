@@ -68,7 +68,9 @@ A real example lives in `examples/AllPXRF_FINAL_14Oct.csv` (~4,500 rows) — use
 
 ## Installation from scratch (Windows)
 
-**Use Anaconda, not a plain venv.** TensorFlow, hdbscan, and pykrige all ship compiled extensions, and `pip install` on Windows will happily try to build them from source and fail unless you have a full MSVC toolchain. Conda ships prebuilt binaries. This is the path of least suffering.
+**Use Anaconda, not a plain venv.** hdbscan and pykrige ship compiled extensions, and `pip install` on Windows will happily try to build them from source and fail unless you have a full MSVC toolchain. Conda ships prebuilt binaries. This is the path of least suffering.
+
+Once conda is installed, the whole setup is a single command — skip to step 3 if you already have Miniconda and the code.
 
 ### 1. Install Miniconda
 
@@ -76,30 +78,7 @@ Download and run the Windows 64-bit installer from <https://www.anaconda.com/dow
 
 When it finishes, open **Anaconda Prompt** from the Start menu. Do *not* use plain `cmd` or PowerShell for the next steps unless you've run `conda init` — and don't use the `python` that's already on your PATH, that's the Microsoft Store stub and it doesn't work.
 
-### 2. Create the environment
-
-```bat
-conda create -n ArchaeoSightDesktop python=3.12 -y
-conda activate ArchaeoSightDesktop
-```
-
-### 3. Install the dependencies
-
-The two packages that genuinely need conda go first:
-
-```bat
-conda install -c conda-forge hdbscan pykrige -y
-```
-
-The rest install cleanly with pip *inside the activated conda env*:
-
-```bat
-pip install PyQt6 numpy pandas scikit-learn scipy matplotlib openpyxl xlrd tensorflow onnx onnxruntime skl2onnx tf2onnx
-```
-
-> **On TensorFlow:** on Windows, TF 2.11+ is CPU-only — GPU support requires WSL2. This app's autoencoder is small enough that CPU is fine; expect the Clustering tab to take a couple of minutes on a few thousand rows.
-
-### 4. Get the code
+### 2. Get the code
 
 If you have Git:
 
@@ -110,9 +89,20 @@ cd ArchaeoSightDesktop
 
 Otherwise download the ZIP, extract it, and `cd` into the folder.
 
-### 5. Run it
+### 3. Create the environment — one command
 
 ```bat
+conda env create -f environment.yml
+```
+
+That's the entire install. `environment.yml` pins every dependency and handles the conda/pip split for you: hdbscan and pykrige come from conda-forge as prebuilt binaries, TensorFlow and the ONNX stack install from PyPI into the same environment. Give it ten minutes or so — TensorFlow is a large download.
+
+> **On TensorFlow:** on Windows, TF 2.11+ is CPU-only — GPU support requires WSL2. This app's autoencoder is small enough that CPU is fine; expect the Clustering tab to take a couple of minutes on a few thousand rows.
+
+### 4. Run it
+
+```bat
+conda activate ArchaeoSightDesktop
 python main.py
 ```
 
@@ -134,9 +124,24 @@ Or skip the activation entirely by calling the env's interpreter directly:
 C:\Users\<you>\anaconda3\envs\ArchaeoSightDesktop\python.exe main.py
 ```
 
+### Updating or rebuilding the environment
+
+After `environment.yml` changes:
+
+```bat
+conda env update -f environment.yml --prune
+```
+
+To start over from scratch:
+
+```bat
+conda env remove -n ArchaeoSightDesktop
+conda env create -f environment.yml
+```
+
 ### A note on `requirements.txt`
 
-The `requirements.txt` in this repo records the exact versions of a known-good environment, but it uses conda-style single `=` pins — **it is not pip-installable as-is**. Use the install steps above; consult the file only when you need to pin an exact version to reproduce a result.
+`environment.yml` is the supported install. `requirements.txt` is kept alongside it as a reference pin list — it's pip-valid, but `pip install -r requirements.txt` on Windows will fail trying to compile hdbscan and pykrige from source unless you have the MSVC build tools. Use it to check or reproduce an exact version, not to install.
 
 ---
 
@@ -184,7 +189,20 @@ Stick with one-folder builds. `--onefile` with TensorFlow produces something eno
 
 **`ModuleNotFoundError: No module named 'PyQt6'`** (or tensorflow, hdbscan…) — the env isn't active, or you installed into a different one. Check with `conda env list` and `where python`.
 
-**hdbscan or pykrige fails to build during pip install** — you tried to pip them. Install those two from conda-forge as shown above.
+**hdbscan or pykrige fails to build during install** — you're pip-installing them. Use `conda env create -f environment.yml`, which pulls both from conda-forge as prebuilt binaries.
+
+**`DLL load failed while importing QtCore/QtWidgets: The specified procedure could not be found`** — don't "fix" this by upgrading PyQt6; it's why PyQt6 is pinned to 6.8.1. Note the message says *procedure*, not *module*: a DLL was found and loaded, it just doesn't export a symbol the caller wants. PyQt6 6.10.2's `Qt6Core.dll` imports version-stamped symbols from `icuuc.dll`, and on this machine the only ICU the loader finds is the wrong build — the failure happens below Python entirely and reproduces with a bare `ctypes.WinDLL` load of `Qt6Core.dll`. 6.8.1 has no such dependency.
+
+If you hit this again after changing versions, `diagnose_qt.py` in the project root will name the exact DLL and missing exports:
+
+```bat
+pip install pefile
+python diagnose_qt.py
+```
+
+Things that look like the cause but aren't, all ruled out on this machine: mismatched `PyQt6` / `PyQt6-Qt6` / `PyQt6-sip` pins, an outdated Visual C++ redistributable (System32 was already current), the stale `msvcp140.dll` bundled inside `PyQt6\Qt6\bin`, and a conda-installed Qt shadowing the pip one.
+
+**`conda env create` fails to solve** — usually a channel issue. Confirm conda-forge is reachable (`conda config --show channels`) and try again; if a specific pin is unavailable for your platform, loosen it in `environment.yml` (e.g. `pandas=3.0.*` → `pandas`) and re-run.
 
 **The app opens but a tab throws on Run** — every tab has a log panel showing the full traceback. Start there; the computation runs on a background thread and the error is reported verbatim.
 
@@ -205,6 +223,8 @@ pages/
   KrigingPage.py                        spatial interpolation
   NextDigPage.py                        adaptive sampling recommendations
 montecarlo_samples.py      synthetic sample generator (CLI)
+environment.yml            the full environment — the one-command install
+requirements.txt           reference pin list (not the install path)
 build_windows.py           PyInstaller driver
 pyi_rth_native_dlls.py     runtime hook for native DLLs in frozen builds
 examples/                  reference datasets

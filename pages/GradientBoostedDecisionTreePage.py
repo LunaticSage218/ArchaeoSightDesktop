@@ -11,12 +11,14 @@ from PyQt6.QtWidgets import (
     QRadioButton, QButtonGroup, QTextEdit, QSplitter, QFrame
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QFont
 
 from styles import (
-    _section, _bold_label, _primary_btn, _h_line,
+    _section, _bold_label, _primary_btn, _h_line, _cell, _blend,
     PAGE_HEADER_BG, PAGE_HEADER_FG, GREEN, GREEN_HOVER,
-    ACCENT_ALT, ACCENT_ALT_H,
+    ACCENT_ALT, ACCENT_ALT_H, BG_SURFACE,
+    CELL_INFO_BG, CELL_INFO_FG, CELL_GOOD_BG, CELL_GOOD_FG,
+    CELL_BAD_BG, CELL_BAD_FG,
 )
 
 # ── Periodic table element symbols used to filter columns ─────────────────
@@ -630,13 +632,14 @@ class TrainTab(QWidget):
         for i in range(n):
             for j in range(n):
                 val = cm[i][j]
-                item = QTableWidgetItem(str(val))
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if i == j and val > 0:
-                    intensity = int(180 + 75 * val / max_val)
-                    item.setBackground(QColor(0, min(intensity, 255), 0, 120))
+                    # Deeper green as the count grows; foreground stays fixed.
+                    bg = _blend(BG_SURFACE, CELL_GOOD_BG, 0.35 + 0.65 * val / max_val)
+                    item = _cell(str(val), bg, CELL_GOOD_FG, center=True)
                 elif val > 0:
-                    item.setBackground(QColor(255, 80, 80, 100))
+                    item = _cell(str(val), CELL_BAD_BG, CELL_BAD_FG, center=True)
+                else:
+                    item = _cell(str(val), center=True)
                 self.cm_table.setItem(i, j, item)
         self.cm_table.resizeColumnsToContents()
         self.cm_table.resizeRowsToContents()
@@ -880,11 +883,12 @@ class TestTab(QWidget):
         highlight_cols = {'Predicted_Material', 'Binary_Prediction', 'Confidence',
                           'Soil_Probability', 'NonSoil_Probability'}
         for col_idx, col_name in enumerate(df.columns):
+            highlighted = col_name in highlight_cols
             for row_idx in range(len(df)):
                 val = df.iloc[row_idx, col_idx]
-                item = QTableWidgetItem(str(val))
-                if col_name in highlight_cols:
-                    item.setBackground(QColor(219, 234, 254))  # light blue
+                item = _cell(str(val),
+                             CELL_INFO_BG if highlighted else None,
+                             CELL_INFO_FG)
                 self.pred_table.setItem(row_idx, col_idx, item)
         self._append_log(f"Done. {len(df)} predictions generated.")
 
@@ -907,12 +911,13 @@ class TestTab(QWidget):
             for i in range(n):
                 for j in range(n):
                     val = cm[i][j]
-                    item = QTableWidgetItem(str(val))
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     if i == j and val > 0:
-                        item.setBackground(QColor(0, min(180 + 75 * val // max_val, 255), 0, 120))
+                        bg = _blend(BG_SURFACE, CELL_GOOD_BG, 0.35 + 0.65 * val / max_val)
+                        item = _cell(str(val), bg, CELL_GOOD_FG, center=True)
                     elif val > 0:
-                        item.setBackground(QColor(255, 80, 80, 100))
+                        item = _cell(str(val), CELL_BAD_BG, CELL_BAD_FG, center=True)
+                    else:
+                        item = _cell(str(val), center=True)
                     self.test_cm_table.setItem(i, j, item)
             self.test_cm_table.resizeColumnsToContents()
             self.test_cm_table.resizeRowsToContents()

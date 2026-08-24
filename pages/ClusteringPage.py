@@ -13,12 +13,13 @@ from PyQt6.QtWidgets import (
     QTextEdit, QSplitter, QFrame
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
-from PyQt6.QtGui import QFont, QColor, QPixmap
+from PyQt6.QtGui import QFont, QPixmap
 
 from styles import (
-    _section, _bold_label, _primary_btn, _h_line,
+    _section, _bold_label, _primary_btn, _h_line, _cell,
     PAGE_HEADER_BG, PAGE_HEADER_FG, IMG_BORDER_STYLE,
     ACCENT_ALT, ACCENT_ALT_H, GREEN, GREEN_HOVER, TEXT_SECONDARY,
+    CELL_INFO_BG, CELL_INFO_FG, CELL_WARN_BG, CELL_WARN_FG,
 )
 
 
@@ -890,11 +891,10 @@ class TrainTab(QWidget):
         for i, (cl, cnt) in enumerate(sorted(counts.items())):
             lbl = "Noise" if cl == -1 else f"Cluster {cl}"
             self.cluster_table.setItem(i, 0, QTableWidgetItem(lbl))
-            item = QTableWidgetItem(str(cnt)); item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             if cl == -1:
-                item.setBackground(QColor(254, 226, 226))
+                item = _cell(str(cnt), CELL_WARN_BG, CELL_WARN_FG, center=True)
             else:
-                item.setBackground(QColor(219, 234, 254))
+                item = _cell(str(cnt), CELL_INFO_BG, CELL_INFO_FG, center=True)
             self.cluster_table.setItem(i, 1, item)
 
         # Plots
@@ -1127,11 +1127,12 @@ class ApplyTab(QWidget):
         self.pred_table.setHorizontalHeaderLabels(list(df.columns))
         highlight = {'Cluster', 'Binary_Prediction', 'Material_Prediction'}
         for ci, col in enumerate(df.columns):
+            highlighted = col in highlight
             for ri in range(len(df)):
                 val  = df.iloc[ri, ci]
-                item = QTableWidgetItem(str(val))
-                if col in highlight:
-                    item.setBackground(QColor(219, 234, 254))
+                item = _cell(str(val),
+                             CELL_INFO_BG if highlighted else None,
+                             CELL_INFO_FG)
                 self.pred_table.setItem(ri, ci, item)
 
     def _on_error(self, msg):

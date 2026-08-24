@@ -1,0 +1,55 @@
+# ArchaeoSight Desktop — complete environment definition.
+#
+#   conda env create -f environment.yml
+#   conda activate ArchaeoSightDesktop
+#   python main.py
+#
+# Why the split between conda and pip:
+#   hdbscan and pykrige ship compiled C extensions. conda-forge has prebuilt
+#   Windows binaries; pip would try to build them from source and fail without
+#   a full MSVC toolchain. Everything under `pip:` installs into this same env
+#   from PyPI, which is upstream's supported path for TensorFlow on Windows.
+#   matplotlib-base (not matplotlib) is deliberate — the plain package pulls in
+#   PyQt5, which would fight with PyQt6. All plotting here uses the Agg backend.
+#
+# PyQt6 is held at 6.8.1 on purpose — do not bump it without testing.
+#   PyQt6 6.10.2 fails to import on this machine with
+#     "DLL load failed while importing QtCore: The specified procedure could
+#      not be found."
+#   Its Qt6Core.dll imports version-stamped symbols from icuuc.dll, and the
+#   only ICU the loader can find is the wrong build, so the import dies before
+#   Python is even involved (it reproduces with a bare ctypes.WinDLL load).
+#   6.8.1's Qt6Core does not have that dependency and imports cleanly.
+#   PyQt6-Qt6 is capped to the 6.8 series for the same reason; letting it drift
+#   to 6.9+ reintroduces the ICU dependency. PyQt6-sip is left unpinned because
+#   PyQt6 already constrains it (>=13.8,<14) and it was never implicated.
+#
+# Also keep Qt out of the conda half of this env: a conda-installed Qt
+# (qt6-main, qt-main, pyqt) puts a second set of Qt DLLs in
+# %CONDA_PREFIX%\Library\bin and invites the same class of collision.
+name: ArchaeoSightDesktop
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.11
+  - numpy=2.4.*
+  - pandas=3.0.*
+  - scipy=1.17.*
+  - scikit-learn=1.8.*
+  - matplotlib-base=3.10.*
+  - hdbscan=0.8.*
+  - pykrige=1.7.*
+  - openpyxl=3.1.*
+  - xlrd=2.0.*
+  - pip
+  - pip:
+      - PyQt6==6.8.1
+      - PyQt6-Qt6==6.8.*
+      - tensorflow==2.20.0
+      - onnx==1.20.1
+      - onnxruntime==1.26.0
+      - skl2onnx==1.20.0
+      - tf2onnx==1.8.4
+      - pyinstaller==6.20.0
