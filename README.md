@@ -166,7 +166,7 @@ Useful flags:
 
 It prints a `corr-diff` per class — the mean absolute difference between the real and synthetic correlation matrices. Near 0 means the synthetic data kept the element relationships intact.
 
-### Building a standalone .exe
+### Building a standalone .exe THIS DOESN'T WORK RN
 
 ```bat
 python build_windows.py                # one-folder build (recommended)
