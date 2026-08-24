@@ -79,7 +79,7 @@ When it finishes, open **Anaconda Prompt** from the Start menu. Do *not* use pla
 ### 2. Create the environment
 
 ```bat
-conda create -n ArchaeoSightDesktop python=3.12 -y
+conda create -n ArchaeoSightDesktop python=3.11 -y
 conda activate ArchaeoSightDesktop
 ```
 
