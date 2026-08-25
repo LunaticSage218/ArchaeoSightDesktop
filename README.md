@@ -237,7 +237,7 @@ Each page follows the same shape: a fixed-width control panel on the left, resul
 
 If you use this project in your research, please cite it as:
 
-> Griffith, L. (2026). *ArchaeoSightDesktop*. GitHub.  
+> Griffith, L., Sharp K. (2026). *ArchaeoSightDesktop*. GitHub.  
 > https://github.com/LunaticSage218/ArchaeoSightDesktop
 
 **DOI:** https://doi.org/10.5281/zenodo.22091615
