@@ -232,3 +232,12 @@ models/                    saved model artifacts
 ```
 
 Each page follows the same shape: a fixed-width control panel on the left, results on the right (log, tables, plots), and all the actual computation on a background `QThread` so the UI never freezes. Heavy imports (TensorFlow, sklearn, pykrige, matplotlib) are deliberately deferred until a worker actually runs, which is why the app starts in about a second despite the stack behind it.
+
+## Citation
+
+If you use this project in your research, please cite it as:
+
+> Larry Griffith. *ArchaeoSightDesktop* GitHub, 2026.
+> [https://github.com/[username]/[repository]](https://github.com/LunaticSage218/ArchaeoSightDesktop.git)
+
+**DOI:** 10.5281/zenodo.22091615
