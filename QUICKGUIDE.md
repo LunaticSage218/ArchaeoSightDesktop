@@ -40,12 +40,12 @@ Use this if Git is already installed (type `git --version`; if you get a
 version number, you have it).
 
 ```bat
-cd %USERPROFILE%\Documents
+cd some-directory-you-can-find
 git clone https://github.com/LunaticSage218/ArchaeoSightDesktop.git
 cd ArchaeoSightDesktop
 ```
 
-The folder is now at `C:\Users\<your name>\Documents\ArchaeoSightDesktop`.
+The folder is now at `C:\Users\<your name>\some-directory-you-can-find\ArchaeoSightDesktop`.
 
 To get later updates, come back to this folder and run:
 
@@ -60,11 +60,11 @@ git pull
 3. Open your **Downloads** folder, right-click `ArchaeoSightDesktop-main.zip`,
    and choose **Extract All…**
 4. In the box that appears, set the destination to
-   `C:\Users\<your name>\Documents` and click **Extract**.
+   `C:\Users\<your name>\some-directory-you-can-find` and click **Extract**.
 5. Back in Anaconda Prompt, type:
 
 ```bat
-cd %USERPROFILE%\Documents\ArchaeoSightDesktop-main
+cd %USERPROFILE%\some-directory-you-can-find\ArchaeoSightDesktop-main
 ```
 
 > **Note:** the ZIP creates a folder named `ArchaeoSightDesktop-main` (with
@@ -115,7 +115,7 @@ type these three lines:
 
 ```bat
 conda activate ArchaeoSightDesktop
-cd %USERPROFILE%\Documents\ArchaeoSightDesktop
+cd %USERPROFILE%\some-directory-you-can-find\ArchaeoSightDesktop
 python main.py
 ```
 
@@ -154,7 +154,7 @@ In the ArchaeoSight window, stay on the **Gradient Boosted Decision Tree** tab
 and make sure the inner tab **Train Model** is selected.
 
 **1. Data File** — click **Browse**, navigate into the project folder, open the
-`examples` folder, and choose `AllPXRF_FINAL_14Oct.csv`.
+`examples` folder, and choose `AllPXRF_FINAL_14Oct_synthetic.csv`. This contains a dataset with real and synthetic data.
 
 The two dropdowns below wake up once the file loads.
 
@@ -169,7 +169,7 @@ The two dropdowns below wake up once the file loads.
   and it is the honest one. (`CNTXT` groups by context instead, which is
   stricter still.)
 
-**2. Hyperparameters** — leave all four at their defaults for your first run:
+**2. Hyperparameters** — leave all four at their defaults for your first run, you can change them later on if you please: 
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -178,12 +178,14 @@ The two dropdowns below wake up once the file loads.
 | `max_depth` | 4 | How many questions deep each tree may go. Deeper trees memorise rather than generalise. |
 | `random_state` | 42 | Fixes the shuffling, so re-running gives identical numbers. Only change this if you want to see how much luck was involved. |
 
+In a real scenario, you want to train the tree slowly and deeply, but for now the defaults are for illustrating what it does. 
+
 **3. Save Model**
 
 - Leave the format on **Pickle (.pkl)**. (ONNX is only needed for exporting to
   the Android app.)
 - **Model name:** type `example_gbdt`
-- Click **Browse** and choose the `models` folder inside the project.
+- Click **Browse** and choose the `models` folder inside the project. If there isn't a models folder, go ahead and make one. 
 
 Now click **▶ Train Model**.
 
