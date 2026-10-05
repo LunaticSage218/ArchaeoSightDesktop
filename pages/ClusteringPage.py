@@ -65,6 +65,14 @@ class TrainWorker(QObject):
             out_dir.mkdir(parents=True, exist_ok=True)
 
             seed = 42
+            # Seed every RNG the pipeline touches. Keras weight init was
+            # previously unseeded, so identical settings produced a different
+            # number of clusters on each run.
+            np.random.seed(seed)
+            try:
+                tf.keras.utils.set_random_seed(seed)   # python + numpy + tf
+            except AttributeError:                     # older keras
+                tf.random.set_seed(seed)
 
             # ── Step 1: load data ─────────────────────────────────────────────
             self.log.emit("Step 1: Loading data…")
@@ -661,10 +669,15 @@ class TrainTab(QWidget):
         hb = _section("2. Hyperparameters")
         hf = QFormLayout(hb); hf.setSpacing(6)
 
-        self.latent_spin = QSpinBox(); self.latent_spin.setRange(2, 64); self.latent_spin.setValue(8)
+        # 12: reconstruction plateaus around here, and it gave the most
+        # reproducible cluster count across repeated runs (8 was noticeably
+        # less stable, 24+ throws away variance the PCA-5 step needs).
+        self.latent_spin = QSpinBox(); self.latent_spin.setRange(2, 64); self.latent_spin.setValue(12)
         hf.addRow("Latent dim:", self.latent_spin)
 
-        self.epoch_spin = QSpinBox(); self.epoch_spin.setRange(5, 2000); self.epoch_spin.setValue(100)
+        # Ceiling only — EarlyStopping(patience=10) usually halts near epoch 75.
+        # 100 sat close enough to that to occasionally truncate training.
+        self.epoch_spin = QSpinBox(); self.epoch_spin.setRange(5, 2000); self.epoch_spin.setValue(300)
         hf.addRow("Max epochs:", self.epoch_spin)
 
         self.batch_spin = QSpinBox(); self.batch_spin.setRange(8, 512); self.batch_spin.setValue(32)
