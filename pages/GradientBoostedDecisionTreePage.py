@@ -33,6 +33,33 @@ PERIODIC_TABLE_ELEMENTS = {
     'Bh','Hs','Mt','Ds','Rg','Cn','Nh','Fl','Mc','Lv','Ts','Og'
 }
 
+# Label values treated as "no label" (compared case-insensitively, after trimming)
+UNLABELED_TOKENS = {'', 'blank', 'unknown', 'nan', 'none', 'na', 'n/a', 'desconocido'}
+# Spellings folded into the canonical 'soil' class used by the binary metrics
+SOIL_SYNONYMS = {'soil', 'tierra', 'suelo'}
+# Training needs at least this many rows per class (stratified holdout split)
+MIN_CLASS_COUNT = 2
+
+
+def _clean_labels(series, unlabeled_as='soil'):
+    """Normalise a raw label column.
+
+    Trims/collapses whitespace, folds case variants onto their most common
+    spelling, maps soil synonyms to 'soil', and replaces unlabeled cells with
+    ``unlabeled_as`` — or NaN when it is None (caller drops those rows).
+    """
+    s = series.astype('string').str.strip().str.replace(r'\s+', ' ', regex=True)
+    s = s.mask(s.isna() | s.str.lower().isin(UNLABELED_TOKENS))
+    if unlabeled_as is not None:
+        s = s.fillna(unlabeled_as)
+    s = s.mask(s.str.lower().isin(SOIL_SYNONYMS), 'soil')
+    # Case variants ('Ceramica' / 'ceramica') -> the most frequent spelling
+    canon = {}
+    for val in s.dropna().value_counts().index:
+        canon.setdefault(val.lower(), val)
+    s = s.map(lambda v: canon[v.lower()] if pd.notna(v) else v)
+    return s.astype(object)
+
 
 # ── Worker for training in background ─────────────────────────────────────────
 class TrainWorker(QObject):
@@ -41,7 +68,7 @@ class TrainWorker(QObject):
     log = pyqtSignal(str)
 
     def __init__(self, file_path, label_col, params, save_format, model_name, save_dir,
-                 group_col=None):
+                 group_col=None, unlabeled_as='soil'):
         super().__init__()
         self.file_path = file_path
         self.label_col = label_col
@@ -50,6 +77,7 @@ class TrainWorker(QObject):
         self.model_name = model_name
         self.save_dir = save_dir
         self.group_col = group_col
+        self.unlabeled_as = unlabeled_as  # None = drop unlabeled rows
 
     def run(self):
         try:
@@ -67,6 +95,36 @@ class TrainWorker(QObject):
             df = pd.read_excel(self.file_path) if ext in ('.xlsx', '.xls') else pd.read_csv(self.file_path)
             self.log.emit(f"Loaded {len(df)} rows.")
 
+            # Labels: normalise, then drop unlabeled rows (if asked) and
+            # classes too small for a stratified split
+            y = _clean_labels(df[self.label_col], self.unlabeled_as)
+            n_unlabeled = int(y.isna().sum())
+            if n_unlabeled:
+                self.log.emit(f"Dropped {n_unlabeled} unlabeled row(s).")
+            counts = y.value_counts()
+            rare = counts[counts < MIN_CLASS_COUNT]
+            if len(rare):
+                self.log.emit(
+                    f"Dropped {int(rare.sum())} row(s) from classes with fewer than "
+                    f"{MIN_CLASS_COUNT} samples: "
+                    + ', '.join(f"'{c}' ({n})" for c, n in rare.items()))
+            keep = y.notna() & ~y.isin(rare.index)
+            df = df.loc[keep].reset_index(drop=True)
+            y = y.loc[keep].reset_index(drop=True)
+            counts = counts.drop(rare.index)
+            if len(counts) < 2:
+                raise ValueError(
+                    f"Need at least 2 classes with {MIN_CLASS_COUNT}+ samples to train; "
+                    f"found {len(counts)}: {', '.join(map(str, counts.index)) or 'none'}")
+            self.log.emit(f"Classes ({len(counts)}): "
+                          + ', '.join(f"{c} ({n})" for c, n in counts.items()))
+            if counts.min() < 5:
+                self.log.emit("Note: some classes have fewer than 5 samples, so not "
+                              "every CV fold will contain them.")
+            if 'soil' not in counts.index:
+                self.log.emit("Warning: no 'soil' class — soil/non-soil binary "
+                              "metrics will not be meaningful.")
+
             # Element columns
             element_cols = [c for c in df.columns
                             if c in PERIODIC_TABLE_ELEMENTS and c != self.label_col]
@@ -74,9 +132,6 @@ class TrainWorker(QObject):
 
             X = df[element_cols].copy().fillna(0)
             X[X < 0] = 0
-
-            y = df[self.label_col].copy().fillna('soil')
-            y = y.replace(['blank', 'unknown', ''], 'soil')
 
             # Encode
             le = LabelEncoder()
@@ -87,7 +142,9 @@ class TrainWorker(QObject):
             # reflect performance on genuinely unseen contexts.
             groups = None
             if self.group_col and self.group_col in df.columns:
-                groups = df[self.group_col].astype(str).values
+                # map(str), not astype(str): pandas 3 keeps NaN through astype,
+                # and mixed float/str groups can't be sorted
+                groups = df[self.group_col].map(str).to_numpy(dtype=object)
                 self.log.emit(f"Grouping splits by '{self.group_col}' "
                               f"({len(np.unique(groups))} groups).")
 
@@ -169,6 +226,7 @@ class TrainWorker(QObject):
                 'scaler': scaler,
                 'label_encoder': le,
                 'element_columns': element_cols,
+                'unlabeled_as': self.unlabeled_as,
             }
 
             if self.save_format == 'pickle':
@@ -236,6 +294,7 @@ class TestWorker(QObject):
                 scaler = save_obj['scaler']
                 le = save_obj['label_encoder']
                 element_cols = save_obj['element_columns']
+                unlabeled_as = save_obj.get('unlabeled_as', 'soil')
                 use_onnx = False
             elif ext == '.onnx':
                 import onnxruntime as rt
@@ -246,6 +305,7 @@ class TestWorker(QObject):
                 scaler = meta['scaler']
                 le = meta['label_encoder']
                 element_cols = meta['element_columns']
+                unlabeled_as = meta.get('unlabeled_as', 'soil')
                 model = sess
                 use_onnx = True
             else:
@@ -305,13 +365,20 @@ class TestWorker(QObject):
             metrics = None
             if self.label_col and self.label_col in df.columns:
                 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-                y_true = df[self.label_col].fillna('soil').replace(['blank','unknown',''], 'soil')
-                acc_multi = accuracy_score(y_true, y_pred)
+                # Same label cleaning as training; rows left unlabeled (when the
+                # model was trained with "drop") are predicted but not scored.
+                y_true = _clean_labels(df[self.label_col], unlabeled_as)
+                scored = y_true.notna().to_numpy()
+                if not scored.all():
+                    self.log.emit(f"{int((~scored).sum())} unlabeled row(s) excluded from metrics.")
+                y_true = y_true[scored].to_numpy()
+                y_pred_s, binary_pred_s = y_pred[scored], binary_pred[scored]
+                acc_multi = accuracy_score(y_true, y_pred_s)
                 y_bin_true = np.where(y_true == 'soil', 'soil', 'non-soil')
-                acc_binary = accuracy_score(y_bin_true, binary_pred)
-                unique_labels = sorted(set(y_true.tolist() + y_pred.tolist()))
-                cm = confusion_matrix(y_true, y_pred, labels=unique_labels)
-                report = classification_report(y_true, y_pred, output_dict=True, zero_division=0)
+                acc_binary = accuracy_score(y_bin_true, binary_pred_s)
+                unique_labels = sorted(set(y_true.tolist() + y_pred_s.tolist()))
+                cm = confusion_matrix(y_true, y_pred_s, labels=unique_labels)
+                report = classification_report(y_true, y_pred_s, output_dict=True, zero_division=0)
                 metrics = {
                     'acc_multi': acc_multi,
                     'acc_binary': acc_binary,
@@ -365,8 +432,19 @@ class TrainTab(QWidget):
         self.label_col_combo = QComboBox()
         self.label_col_combo.setPlaceholderText("Select sample-type column…")
         self.label_col_combo.setEnabled(False)
+        self.label_col_combo.currentTextChanged.connect(self._refresh_unlabeled_options)
         file_form.addWidget(QLabel("Sample type column:"))
         file_form.addWidget(self.label_col_combo)
+
+        self.unlabeled_combo = QComboBox()
+        self.unlabeled_combo.setEnabled(False)
+        self.unlabeled_combo.setToolTip(
+            "What to do with rows whose sample type is blank, 'unknown',\n"
+            "'blank' or 'desconocido': assign them to a class, or leave\n"
+            "them out of training entirely.")
+        file_form.addWidget(QLabel("Unlabeled cells:"))
+        file_form.addWidget(self.unlabeled_combo)
+        self._refresh_unlabeled_options()
 
         self.group_col_combo = QComboBox()
         self.group_col_combo.setPlaceholderText("None (random splits)")
@@ -385,21 +463,24 @@ class TrainTab(QWidget):
         hp_form = QFormLayout(hp_box)
         hp_form.setSpacing(6)
 
+        # Defaults below were chosen on examples/AllPXRF_FINAL_14Oct.csv using
+        # 5-fold cross-validation grouped by BAG: half the learning rate, three
+        # times the trees, one level deeper. Depth 6+ starts losing ground.
         self.n_est_spin = QSpinBox()
         self.n_est_spin.setRange(10, 2000)
-        self.n_est_spin.setValue(100)
+        self.n_est_spin.setValue(300)
         hp_form.addRow("n_estimators:", self.n_est_spin)
 
         self.lr_spin = QDoubleSpinBox()
         self.lr_spin.setRange(0.001, 1.0)
         self.lr_spin.setSingleStep(0.01)
         self.lr_spin.setDecimals(3)
-        self.lr_spin.setValue(0.1)
+        self.lr_spin.setValue(0.05)
         hp_form.addRow("learning_rate:", self.lr_spin)
 
         self.depth_spin = QSpinBox()
         self.depth_spin.setRange(1, 20)
-        self.depth_spin.setValue(4)
+        self.depth_spin.setValue(5)
         hp_form.addRow("max_depth:", self.depth_spin)
 
         self.seed_spin = QSpinBox()
@@ -522,23 +603,44 @@ class TrainTab(QWidget):
     def _load_columns(self, path):
         try:
             ext = os.path.splitext(path)[1].lower()
-            df = pd.read_excel(path, nrows=1) if ext in ('.xlsx', '.xls') else pd.read_csv(path, nrows=1)
+            # Full read: the unlabeled-cells dropdown lists the label column's classes
+            df = pd.read_excel(path) if ext in ('.xlsx', '.xls') else pd.read_csv(path)
             self._df = df
             non_element_cols = [c for c in df.columns if c not in PERIODIC_TABLE_ELEMENTS]
             self.label_col_combo.clear()
             self.label_col_combo.addItems(non_element_cols)
             self.label_col_combo.setEnabled(True)
+            i = next((i for i, c in enumerate(non_element_cols)
+                      if str(c).strip().lower() == 'material'), -1)
+            if i >= 0:
+                self.label_col_combo.setCurrentIndex(i)
             self.group_col_combo.clear()
             self.group_col_combo.addItem("")   # blank = no grouping
             self.group_col_combo.addItems(non_element_cols)
             self.group_col_combo.setEnabled(True)
             for hint in ('BAG', 'CNTXT'):
-                i = self.group_col_combo.findText(hint)
+                i = self.group_col_combo.findText(hint, Qt.MatchFlag.MatchFixedString)
                 if i >= 0:
                     self.group_col_combo.setCurrentIndex(i)
                     break
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not read file:\n{e}")
+
+    def _refresh_unlabeled_options(self, *_):
+        """Offer 'soil', 'drop', and every class present in the label column."""
+        prev = self.unlabeled_combo.currentText()
+        self.unlabeled_combo.clear()
+        self.unlabeled_combo.addItem("Mark as 'soil'", 'soil')
+        self.unlabeled_combo.addItem("Drop unlabeled rows", None)
+        label_col = self.label_col_combo.currentText()
+        if self._df is not None and label_col in self._df.columns:
+            labels = _clean_labels(self._df[label_col], None).dropna()
+            for cls in labels.value_counts().index:
+                if cls != 'soil':
+                    self.unlabeled_combo.addItem(f"Mark as '{cls}'", cls)
+        i = self.unlabeled_combo.findText(prev)
+        self.unlabeled_combo.setCurrentIndex(max(i, 0))
+        self.unlabeled_combo.setEnabled(self._df is not None)
 
     def _browse_save_dir(self):
         path = QFileDialog.getExistingDirectory(self, "Select Save Directory")
@@ -582,7 +684,8 @@ class TrainTab(QWidget):
 
         self._thread = QThread()
         self._worker = TrainWorker(file_path, label_col, params, save_format,
-                                   model_name, save_dir, group_col=group_col)
+                                   model_name, save_dir, group_col=group_col,
+                                   unlabeled_as=self.unlabeled_combo.currentData())
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.log.connect(self._append_log)
